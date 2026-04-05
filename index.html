@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>🎲 LuckyDiscountBot: Угадай число</title>
+    <style>
+        /* Адаптация под тему Telegram и основные стили */
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .game-container {
+            max-width: 450px;
+            width: 100%;
+            background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+            border-radius: 28px;
+            padding: 24px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 { margin: 0 0 10px; color: var(--tg-theme-button-color, #2a9d8f); }
+        .input-area { margin: 20px 0; }
+        input, button {
+            width: 100%;
+            padding: 14px;
+            font-size: 1.2rem;
+            border: none;
+            border-radius: 60px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+            font-weight: bold;
+            text-align: center;
+        }
+        input {
+            background: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #000);
+            border: 1px solid var(--tg-theme-hint-color, #ccc);
+        }
+        button {
+            background: var(--tg-theme-button-color, #2a9d8f);
+            color: var(--tg-theme-button-text-color, #fff);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.97); }
+        .message {
+            margin: 15px 0;
+            padding: 12px;
+            background: var(--tg-theme-bg-color, #fff);
+            border-radius: 20px;
+        }
+        .attempts { font-size: 0.9rem; opacity: 0.8; margin-bottom: 10px; }
+        .footer { margin-top: 20px; font-size: 0.7rem; opacity: 0.6; }
+    </style>
+</head>
+<body>
+<div class="game-container">
+    <h1>🎲 Угадай число (1-10)</h1>
+    <div class="attempts" id="attemptsText">🎯 Попыток осталось: 3</div>
+    <div class="input-area">
+        <input type="number" id="guessInput" placeholder="Введи число" min="1" max="10">
+        <button id="guessBtn">✅ Проверить</button>
+    </div>
+    <div class="message" id="messageArea">✨ Начни игру, введи число!</div>
+    <div class="footer">🎁 За победу получишь промокод на скидку в «ТехноМаркет»</div>
+</div>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand(); // Растягиваем приложение на весь экран
+
+    // Игровая логика
+    let secretNumber = Math.floor(Math.random() * 10) + 1;
+    let attemptsLeft = 3;
+    let gameActive = true;
+
+    const guessInput = document.getElementById('guessInput');
+    const guessBtn = document.getElementById('guessBtn');
+    const attemptsText = document.getElementById('attemptsText');
+    const messageArea = document.getElementById('messageArea');
+
+    function sendGameResult(isWin) {
+        // Отправляем результат игры обратно в Telegram-бота
+        tg.sendData(JSON.stringify({ win: isWin, secret: secretNumber }));
+        if (isWin) setTimeout(() => tg.close(), 1500); // Закрываем окно при победе
+    }
+
+    function endGame(isWin, customMessage = null) {
+        if (!gameActive) return;
+        gameActive = false;
+        messageArea.innerHTML = customMessage || (isWin ? `🎉 ПОБЕДА! Число ${secretNumber} угадано!` : `😔 Проигрыш. Было загадано ${secretNumber}.`);
+        sendGameResult(isWin);
+        guessBtn.disabled = true;
+        guessInput.disabled = true;
+    }
+
+    guessBtn.addEventListener('click', () => {
+        if (!gameActive) return;
+        let guess = parseInt(guessInput.value, 10);
+        if (isNaN(guess) || guess < 1 || guess > 10) {
+            messageArea.innerHTML = "⚠️ Введи число от 1 до 10";
+            return;
+        }
+        attemptsLeft--;
+        attemptsText.innerText = `🎯 Попыток осталось: ${attemptsLeft}`;
+
+        if (guess === secretNumber) {
+            endGame(true);
+        } else if (attemptsLeft === 0) {
+            endGame(false);
+        } else {
+            const hint = guess < secretNumber ? "больше" : "меньше";
+            messageArea.innerHTML = `❌ Неверно! Загаданное число ${hint}. Осталось попыток: ${attemptsLeft}`;
+            guessInput.value = "";
+            guessInput.focus();
+        }
+    });
+</script>
+</body>
+</html>
