@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Lucky Clicker</title>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            color: white;
+        }
+        .game-container {
+            background: rgba(0,0,0,0.7);
+            border-radius: 30px;
+            padding: 20px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        h1 { font-size: 28px; margin: 0 0 10px; }
+        .timer {
+            font-size: 48px;
+            font-weight: bold;
+            background: #000000aa;
+            border-radius: 20px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .score {
+            font-size: 36px;
+            font-weight: bold;
+            background: #ffa500;
+            color: #1e3c72;
+            border-radius: 20px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .click-btn {
+            background: #ff6b6b;
+            border: none;
+            color: white;
+            font-size: 40px;
+            font-weight: bold;
+            padding: 20px 40px;
+            border-radius: 80px;
+            width: 80%;
+            margin: 20px auto;
+            cursor: pointer;
+            transition: transform 0.1s, background 0.2s;
+            box-shadow: 0 8px 0 #c0392b;
+        }
+        .click-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 4px 0 #c0392b;
+        }
+        .click-btn.disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 8px 0 #7f8c8d;
+        }
+        .result {
+            font-size: 20px;
+            margin-top: 20px;
+            padding: 10px;
+            background: #2c3e50;
+            border-radius: 20px;
+        }
+        button {
+            background: #27ae60;
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            font-size: 18px;
+            border-radius: 40px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .info {
+            font-size: 14px;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+<div class="game-container">
+    <h1>🖱️ КЛИКЕР 🖱️</h1>
+    <p>Нажимай на кнопку быстрее! У тебя 10 секунд.</p>
+    <div class="timer">⏱️ 10.0</div>
+    <div class="score">🏆 Кликов: 0</div>
+    <button class="click-btn" id="clickBtn">КЛИК!</button>
+    <div class="result" id="resultArea"></div>
+    <button id="sendResult" style="display:none;">✅ Отправить результат и получить промокод</button>
+    <div class="info">Чем больше кликов, тем выше скидка!<br>5% — 10-19 кликов, 10% — 20-29, 15% — 30+</div>
+</div>
+
+<script>
+    let clicks = 0;
+    let timeLeft = 10;
+    let gameActive = false;
+    let timerInterval = null;
+    let tg = null;
+
+    // Инициализация Telegram WebApp
+    if (window.TelegramWebApp) {
+        tg = window.TelegramWebApp;
+        tg.expand();
+        tg.ready();
+    } else {
+        alert('Используйте приложение Telegram для игры');
+    }
+
+    const clickBtn = document.getElementById('clickBtn');
+    const timerDiv = document.querySelector('.timer');
+    const scoreDiv = document.querySelector('.score');
+    const resultDiv = document.getElementById('resultArea');
+    const sendBtn = document.getElementById('sendResult');
+
+    function updateUI() {
+        timerDiv.innerText = `⏱️ ${timeLeft.toFixed(1)}`;
+        scoreDiv.innerText = `🏆 Кликов: ${clicks}`;
+    }
+
+    function startGame() {
+        if (gameActive) return;
+        clicks = 0;
+        timeLeft = 10;
+        gameActive = true;
+        clickBtn.classList.remove('disabled');
+        updateUI();
+        resultDiv.innerHTML = '';
+        sendBtn.style.display = 'none';
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            if (!gameActive) return;
+            timeLeft -= 0.1;
+            if (timeLeft <= 0) {
+                timeLeft = 0;
+                endGame();
+            }
+            updateUI();
+        }, 100);
+    }
+
+    function endGame() {
+        gameActive = false;
+        clearInterval(timerInterval);
+        clickBtn.classList.add('disabled');
+        let discount = 0;
+        let message = '';
+        if (clicks >= 30) {
+            discount = 15;
+            message = '🎉🔥 Супер! Ты накликал 30+ раз! Скидка 15%!';
+        } else if (clicks >= 20) {
+            discount = 10;
+            message = '👍 Отлично! Скидка 10%!';
+        } else if (clicks >= 10) {
+            discount = 5;
+            message = '🙂 Неплохо! Скидка 5%!';
+        } else {
+            discount = 0;
+            message = '😢 Очень мало кликов. Попробуй ещё раз завтра.';
+        }
+        if (discount > 0) {
+            resultDiv.innerHTML = `<span style="color:lightgreen;">${message}</span><br>Ваш результат: ${clicks} кликов. Нажмите кнопку ниже, чтобы получить промокод.`;
+            sendBtn.style.display = 'inline-block';
+            sendBtn.onclick = () => {
+                if (tg) {
+                    tg.sendData(JSON.stringify({ score: clicks, discount: discount }));
+                    tg.close();
+                }
+            };
+        } else {
+            resultDiv.innerHTML = message + ' Завтра новая попытка.';
+            sendBtn.style.display = 'none';
+        }
+    }
+
+    clickBtn.onclick = () => {
+        if (!gameActive) {
+            startGame();
+        } else {
+            clicks++;
+            updateUI();
+            clickBtn.style.transform = 'scale(0.95)';
+            setTimeout(() => { clickBtn.style.transform = ''; }, 100);
+        }
+    };
+
+    // Ждём готовность WebApp, потом автостарт
+    if (tg) {
+        startGame();
+    }
+</script>
+</body>
+</html>
