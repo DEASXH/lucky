@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>LuckyDiscountBot — Викторина на скидку</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="telegram-bot">
+    <div class="bot-header">
+        <div class="bot-avatar">🎰</div>
+        <div class="bot-info">
+            <h2>LuckyDiscountBot</h2>
+            <p>ТехноМаркет | Играй и получи скидку</p>
+        </div>
+    </div>
+    <div class="chat-area" id="chatMessages">
+        <div class="message bot-message">
+            <div class="message-bubble">🤖 Привет! Я бот магазина «ТехноМаркет»<br>🎯 Викторина из 5 вопросов — за правильные ответы даю ПРОМОКОД на скидку!<br>📌 До 5 попыток в день, 1 промокод в месяц. Честная игра без обмана!<br>👇 Нажми «🎮 Играть» и выигрывай!</div>
+            <div class="message-time">только что</div>
+        </div>
+    </div>
+    <div class="action-panel" id="actionPanel">
+        <button class="tg-button primary" id="startGameBtn">🎮 Играть</button>
+        <button class="tg-button" id="myPromoBtn">🎁 Мой промокод</button>
+        <button class="tg-button" id="shareBtn">📤 Поделиться</button>
+        <button class="tg-button" id="leaderBtn">🏆 Статистика</button>
+        <button class="tg-button" id="adminBtn">🔐 Админ</button>
+    </div>
+    <footer>⭐ Честная игра · Скидка до 15% · Промокод действителен 7 дней</footer>
+</div>
+<script>
+    const QUIZ_SET = [
+        { text: "Какая оперативная память самая быстрая для игр?", options: ["DDR3", "DDR4", "DDR5", "LPDDR4"], correct: 2 },
+        { text: "Какой процессор от AMD в 2025 году считается топовым для игр?", options: ["Ryzen 5 5600X", "Ryzen 7 7800X3D", "Ryzen 9 7900", "Ryzen Threadripper"], correct: 1 },
+        { text: "Что означает аббревиатура SSD?", options: ["Solid State Drive", "Super Speed Disk", "System Storage Device", "Secure Data Drive"], correct: 0 },
+        { text: "Какой тип матрицы дисплея дает лучшую цветопередачу?", options: ["TN", "VA", "IPS", "OLED"], correct: 3 },
+        { text: "Какой видеокарты не существует в линейке NVIDIA RTX 40?", options: ["RTX 4060", "RTX 4070", "RTX 4080", "RTX 4090 Ti Super"], correct: 3 }
+    ];
+    let user = {
+        userId: "tg_user_" + Math.random().toString(36).substr(2, 8),
+        daily: { date: "", attemptsUsed: 0 },
+        totalGames: 0,
+        wins: 0,
+        activePromo: null,
+        promoHistory: [],
+        settings: {
+            maxAttemptsPerDay: 5,
+            promoValidityDays: 7,
+            monthlyLimit: 1
+        }
+    };
+    let gameState = {
+        active: false,
+        currentIndex: 0,
+        questions: [],
+        correctCount: 0
+    };
+    const chatDiv = document.getElementById("chatMessages");
+    const actionPanel = document.getElementById("actionPanel");
+    let quizContainer = null;
+    function saveToLocalStorage() {
+        localStorage.setItem("LuckyDiscount_User", JSON.stringify(user));
+    }
+    function loadFromLocalStorage() {
+        const raw = localStorage.getItem("LuckyDiscount_User");
+        if (raw) {
+            try {
+                const saved = JSON.parse(raw);
+                user = { ...user, ...saved };
+                if (!user.promoHistory) user.promoHistory = [];
+                if (!user.settings) user.settings = { maxAttemptsPerDay: 5, promoValidityDays: 7, monthlyLimit: 1 };
+                if (!user.daily) user.daily = { date: "", attemptsUsed: 0 };
+                if (user.settings.maxAttemptsPerDay < 3) user.settings.maxAttemptsPerDay = 5;
+                if (user.activePromo && user.activePromo.expiresAt && new Date(user.activePromo.expiresAt) < new Date()) {
+                    user.activePromo = null;
+                }
+                if (user.activePromo && user.activePromo.used === true) user.activePromo = null;
+            } catch(e) { console.warn(e); }
+        }
+        const todayStr = new Date().toISOString().slice(0,10);
+        if (user.daily.date !== todayStr) {
+            user.daily = { date: todayStr, attemptsUsed: 0 };
+            saveToLocalStorage();
+        }
+    }
+    function addBotMessage(text, isHtml = false) {
+        const msgDiv = document.createElement("div");
+        msgDiv.className = "message bot-message";
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble";
+        if (isHtml) bubble.innerHTML = text;
+        else bubble.innerText = text;
+        msgDiv.appendChild(bubble);
+        const timeSpan = document.createElement("div");
+        timeSpan.className = "message-time";
+        timeSpan.innerText = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        msgDiv.appendChild(timeSpan);
+        chatDiv.appendChild(msgDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+    function addUserMessage(text) {
+        const msgDiv = document.createElement("div");
+        msgDiv.className = "message user-message";
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble";
+        bubble.innerText = text;
+        msgDiv.appendChild(bubble);
+        const timeSpan = document.createElement("div");
+        timeSpan.className = "message-time";
+        timeSpan.innerText = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        msgDiv.appendChild(timeSpan);
+        chatDiv.appendChild(msgDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+    function clearQuizButtons() {
+        if (quizContainer && quizContainer.parentNode) quizContainer.remove();
+        quizContainer = null;
+    }
+    function showQuizOptions(options, onSelect) {
+        clearQuizButtons();
+        const container = document.createElement("div");
+        container.className = "quiz-options";
+        options.forEach((opt, idx) => {
+            const btn = document.createElement("button");
+            btn.className = "quiz-btn";
+            btn.innerText = opt;
+            btn.onclick = () => {
+                if (!gameState.active) return;
+                clearQuizButtons();
+                onSelect(idx);
+            };
+            container.appendChild(btn);
+        });
+        actionPanel.appendChild(container);
+        quizContainer = container;
+    }
+    function generatePromoCode() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
+        let code, exists;
+        do {
+            let rand = "";
+            for (let i=0; i<6; i++) rand += chars[Math.floor(Math.random() * chars.length)];
+            code = `TECHNO_${rand}`;
+            exists = user.promoHistory.some(p => p.code === code);
+        } while(exists);
+        return code;
+    }
+    function grantPromoCode() {
+        const now = new Date();
+        const expires = new Date();
+        expires.setDate(expires.getDate() + user.settings.promoValidityDays);
+        const newCode = generatePromoCode();
+        const promoObj = {
+            code: newCode,
+            createdAt: now.toISOString(),
+            expiresAt: expires.toISOString(),
+            used: false
+        };
+        user.activePromo = promoObj;
+        user.promoHistory.push(promoObj);
+        user.wins += 1;
+        saveToLocalStorage();
+        return promoObj;
+    }
+    function canStartGame() {
+        if (user.activePromo) {
+            addBotMessage(`🎫 У вас уже есть активный промокод: <b>${user.activePromo.code}</b><br>⏳ Действует до ${new Date(user.activePromo.expiresAt).toLocaleDateString()}<br>🔁 Используйте его в магазине.`, true);
+            return false;
+        }
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const monthCount = user.promoHistory.filter(p => {
+            const d = new Date(p.createdAt);
+            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+        }).length;
+        if (monthCount >= user.settings.monthlyLimit) {
+            addBotMessage(`📅 Вы уже получили ${monthCount} промокод(ов) в этом месяце. Лимит ${user.settings.monthlyLimit}. Возвращайтесь в следующем месяце!`);
+            return false;
+        }
+        if (user.daily.attemptsUsed >= user.settings.maxAttemptsPerDay) {
+            addBotMessage(`❌ Дневной лимит попыток исчерпан (${user.settings.maxAttemptsPerDay}/${user.settings.maxAttemptsPerDay}). Завтра новая попытка!`);
+            return false;
+        }
+        return true;
+    }
+    function finishGame(isVictory) {
+        if (!gameState.active) return;
+        gameState.active = false;
+        clearQuizButtons();
+        user.daily.attemptsUsed += 1;
+        user.totalGames += 1;
+        saveToLocalStorage();
+        if (isVictory) {
+            const promo = grantPromoCode();
+            addBotMessage(`🎉✨ ПОБЕДА!<br><br>🎁 <b>${promo.code}</b><br>💡 Скидка действительна до ${new Date(promo.expiresAt).toLocaleDateString()}<br>✅ Покажите код на кассе.`, true);
+            addBotMessage(`🌟 Спасибо за честную игру! Ждём вас в «ТехноМаркет»! 🛒`);
+            if (user.promoHistory.length % 5 === 0 && user.promoHistory.length > 0) {
+                addBotMessage("🔔 [АДМИН] Достигнут порог выданных промокодов: " + user.promoHistory.length);
+            }
+        } else {
+            const leftAttempts = user.settings.maxAttemptsPerDay - user.daily.attemptsUsed;
+            addBotMessage(`😔 Неправильный ответ. Осталось попыток сегодня: ${leftAttempts}. Попробуйте снова!`);
+        }
+    }
+    function askQuestion() {
+        if (!gameState.active) return;
+        if (gameState.currentIndex >= gameState.questions.length) {
+            finishGame(true);
+            return;
+        }
+        const q = gameState.questions[gameState.currentIndex];
+        addBotMessage(`❓ Вопрос ${gameState.currentIndex+1}/${gameState.questions.length}: ${q.text}`);
+        showQuizOptions(q.options, (selectedIdx) => {
+            if (!gameState.active) return;
+            addUserMessage(q.options[selectedIdx]);
+            if (selectedIdx === q.correct) {
+                addBotMessage("✅ Верно! +1 балл.");
+                gameState.currentIndex++;
+                askQuestion();
+            } else {
+                addBotMessage(`❌ Ошибка! Правильный ответ: ${q.options[q.correct]}.`);
+                finishGame(false);
+            }
+        });
+    }
+    function startGame() {
+        if (gameState.active) {
+            addBotMessage("Игра уже идёт! Ответьте на текущий вопрос.");
+            return;
+        }
+        if (!canStartGame()) return;
+        const shuffled = [...QUIZ_SET];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        gameState.active = true;
+        gameState.currentIndex = 0;
+        gameState.questions = shuffled;
+        addBotMessage("🎲 ИГРА НАЧАЛАСЬ! Ответьте на 5 вопросов правильно. Удачи! 🍀");
+        askQuestion();
+    }
+    function showActivePromo() {
+        if (user.activePromo && new Date(user.activePromo.expiresAt) > new Date() && !user.activePromo.used) {
+            const expireDate = new Date(user.activePromo.expiresAt).toLocaleDateString();
+            addBotMessage(`🎫 Ваш промокод: <b>${user.activePromo.code}</b><br>⏳ Действителен до ${expireDate}`, true);
+        } else {
+            if (user.activePromo && user.activePromo.used) user.activePromo = null;
+            addBotMessage("У вас нет активного промокода. Нажмите «Играть» и выиграйте скидку!");
+        }
+    }
+    function sharePromo() {
+        if (user.activePromo && new Date(user.activePromo.expiresAt) > new Date() && !user.activePromo.used) {
+            if (navigator.share) {
+                navigator.share({ title: 'Мой промокод TechnoMarket', text: `Мой промокод на скидку: ${user.activePromo.code}`, url: window.location.href });
+            } else {
+                navigator.clipboard.writeText(user.activePromo.code);
+                addBotMessage(`📋 Промокод скопирован! ${user.activePromo.code}`);
+            }
+        } else {
+            addBotMessage("Нет активного промокода. Сначала выиграйте викторину!");
+        }
+    }
+    function showStats() {
+        const activeCode = user.activePromo ? user.activePromo.code : "—";
+        addBotMessage(`📊 <b>Ваша статистика</b><br>🎮 Сыграно игр: ${user.totalGames}<br>🏆 Побед: ${user.wins}<br>🎟️ Получено промокодов: ${user.promoHistory.length}<br>🎫 Активный промокод: ${activeCode}`, true);
+    }
+    function showAdminModal() {
+        const overlay = document.createElement("div");
+        overlay.className = "admin-overlay";
+        const usedPromos = user.promoHistory.filter(p => p.used).length;
+        const card = document.createElement("div");
+        card.className = "admin-card";
+        card.innerHTML = `
+            <h3>🔧 Администратор TechnoMarket</h3>
+            <div class="stat-row"><span>👥 Всего сыграно игр:</span><span>${user.totalGames}</span></div>
+            <div class="stat-row"><span>🎁 Выдано промокодов:</span><span>${user.promoHistory.length}</span></div>
+            <div class="stat-row"><span>✅ Использовано промокодов:</span><span>${usedPromos}</span></div>
+            <div class="stat-row"><span>🏆 Побед:</span><span>${user.wins}</span></div>
+            <hr>
+            <label>📆 Лимит попыток в день:</label>
+            <input type="number" id="adminAttempts" value="${user.settings.maxAttemptsPerDay}" min="1" max="10">
+            <label>📅 Срок действия промокода (дней):</label>
+            <input type="number" id="adminPromoDays" value="${user.settings.promoValidityDays}" min="1" max="30">
+            <label>🗓️ Месячный лимит промокодов:</label>
+            <input type="number" id="adminMonthlyLimit" value="${user.settings.monthlyLimit}" min="1" max="5">
+            <button id="saveSettingsBtn" class="tg-button" style="background:#ff8c42; margin-top:10px;">💾 Сохранить</button>
+            <button id="manualPromoBtn" class="tg-button" style="background:#1e3a5f; margin-top:8px;">🎲 Выдать промокод вручную</button>
+            <button id="exportCSVBtn" class="tg-button" style="background:#1e3a5f;">📎 CSV-отчёт</button>
+            <button id="closeAdminBtn" class="tg-button close-admin">Закрыть</button>
+        `;
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+        document.getElementById("saveSettingsBtn").onclick = () => {
+            const newAttempts = parseInt(document.getElementById("adminAttempts").value);
+            const newDays = parseInt(document.getElementById("adminPromoDays").value);
+            const newMonthly = parseInt(document.getElementById("adminMonthlyLimit").value);
+            if (!isNaN(newAttempts)) user.settings.maxAttemptsPerDay = newAttempts;
+            if (!isNaN(newDays)) user.settings.promoValidityDays = newDays;
+            if (!isNaN(newMonthly)) user.settings.monthlyLimit = newMonthly;
+            saveToLocalStorage();
+            addBotMessage("⚙️ Настройки обновлены.");
+            overlay.remove();
+        };
+        document.getElementById("manualPromoBtn").onclick = () => {
+            if (user.activePromo) {
+                addBotMessage("⚠️ У пользователя уже есть активный промокод.");
+            } else {
+                const newPromo = grantPromoCode();
+                addBotMessage(`🔑 Администратор выдал промокод: <b>${newPromo.code}</b>`, true);
+            }
+            overlay.remove();
+        };
+        document.getElementById("exportCSVBtn").onclick = () => {
+            let csvRows = [["Код промокода","Дата создания","Использован","Истекает"]];
+            for (let p of user.promoHistory) {
+                csvRows.push([p.code, new Date(p.createdAt).toLocaleString(), p.used ? "Да" : "Нет", new Date(p.expiresAt).toLocaleDateString()]);
+            }
+            const csvContent = csvRows.map(row => row.join(",")).join("\n");
+            const blob = new Blob(["\uFEFF" + csvContent], {type: "text/csv;charset=utf-8;"});
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.href = url;
+            link.download = "promocode_history.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            addBotMessage("📊 CSV-отчёт выгружен.");
+            overlay.remove();
+        };
+        document.getElementById("closeAdminBtn").onclick = () => overlay.remove();
+    }
+    function init() {
+        loadFromLocalStorage();
+        document.getElementById("startGameBtn").onclick = () => startGame();
+        document.getElementById("myPromoBtn").onclick = () => showActivePromo();
+        document.getElementById("shareBtn").onclick = () => sharePromo();
+        document.getElementById("leaderBtn").onclick = () => showStats();
+        document.getElementById("adminBtn").onclick = () => {
+            const pwd = prompt("🔐 Введите пароль администратора:");
+            if (pwd === "admin123") showAdminModal();
+            else addBotMessage("❌ Неверный пароль.");
+        };
+        if (user.activePromo && new Date(user.activePromo.expiresAt) > new Date()) {
+            setTimeout(() => {
+                addBotMessage(`🔔 Напоминание: активный промокод <b>${user.activePromo.code}</b>.`, true);
+            }, 800);
+        } else if (user.activePromo && new Date(user.activePromo.expiresAt) <= new Date()) {
+            user.activePromo = null;
+            saveToLocalStorage();
+        }
+    }
+    init();
+</script>
+</body>
+</html>
